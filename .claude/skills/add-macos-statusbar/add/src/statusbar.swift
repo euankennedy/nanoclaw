@@ -5,14 +5,30 @@ class StatusBarController: NSObject {
     private var isRunning = false
     private var timer: Timer?
 
-    private let plistPath = "\(NSHomeDirectory())/Library/LaunchAgents/com.nanoclaw.plist"
-
     /// Derive the NanoClaw project root from the binary location.
     /// The binary is compiled to {project}/dist/statusbar, so the parent of
     /// the parent directory is the project root.
     private static let projectRoot: String = {
         let binary = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         return binary.deletingLastPathComponent().deletingLastPathComponent().path
+    }()
+
+    /// Find the nanoclaw host service plist. Matches com.nanoclaw-*.plist,
+    /// excluding the statusbar plist itself.
+    private static func findServicePlist() -> String? {
+        let agents = "\(NSHomeDirectory())/Library/LaunchAgents"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: agents) else { return nil }
+        return files
+            .filter { $0.hasPrefix("com.nanoclaw-") && $0.hasSuffix(".plist") && !$0.contains("statusbar") }
+            .sorted()
+            .first
+            .map { "\(agents)/\($0)" }
+    }
+
+    private let plistPath: String = findServicePlist() ?? "\(NSHomeDirectory())/Library/LaunchAgents/com.nanoclaw.plist"
+    private let serviceLabel: String = {
+        guard let p = findServicePlist() else { return "com.nanoclaw" }
+        return URL(fileURLWithPath: p).deletingPathExtension().lastPathComponent
     }()
 
     override init() {
@@ -47,7 +63,7 @@ class StatusBarController: NSObject {
     private func checkRunning() -> Bool {
         let task = Process()
         task.launchPath = "/bin/launchctl"
-        task.arguments = ["list", "com.nanoclaw"]
+        task.arguments = ["list", serviceLabel]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()
@@ -111,7 +127,7 @@ class StatusBarController: NSObject {
 
     @objc private func restartService() {
         let uid = getuid()
-        run("/bin/launchctl", ["kickstart", "-k", "gui/\(uid)/com.nanoclaw"])
+        run("/bin/launchctl", ["kickstart", "-k", "gui/\(uid)/\(serviceLabel)"])
         refresh(after: 3)
     }
 
