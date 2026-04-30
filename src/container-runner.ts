@@ -487,7 +487,7 @@ async function buildContainerArgs(
   const imageTag = containerConfig.imageTag || CONTAINER_IMAGE;
   args.push(imageTag);
 
-  args.push('-c', 'exec bun run /app/src/index.ts');
+  args.push('-c', 'exec bash /app/headroom-start.sh');
 
   return args;
 }

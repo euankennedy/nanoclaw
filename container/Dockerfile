@@ -23,6 +23,7 @@ ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=latest
 ARG BUN_VERSION=1.3.12
+ARG HEADROOM_VERSION=0.3.7
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -55,6 +56,29 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         apt-get install -y --no-install-recommends fonts-noto-cjk; \
        fi \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- Headroom context-optimization proxy -------------------------------------
+# Runs as a sidecar in the container; SDK routes through it via ANTHROPIC_BASE_URL.
+# Uses a venv to avoid Debian's externally-managed-environment restriction.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+       python3 python3-dev python3-venv build-essential \
+    && python3 -m venv /opt/headroom-venv \
+    && /opt/headroom-venv/bin/pip install --no-cache-dir \
+       "headroom-ai==${HEADROOM_VERSION}" --no-deps \
+    && /opt/headroom-venv/bin/pip install --no-cache-dir \
+       "hnswlib>=0.8.0" \
+       "fastapi>=0.100.0" "uvicorn>=0.23.0" "httpx[http2]>=0.24.0" \
+       "click>=8.1.0" "pydantic>=2.0.0" "rich>=13.0.0" \
+       "tiktoken>=0.5.0" "openai>=1.0.0" "litellm>=1.0.0" \
+       "pillow>=10.0.0" "protobuf>=6.33.4" "sentencepiece>=0.2.1" \
+    && apt-get remove -y build-essential python3-dev \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/headroom-venv/bin:$PATH"
 
 # Chromium path for agent-browser / Playwright consumers
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -106,7 +130,8 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY headroom-start.sh /app/headroom-start.sh
+RUN chmod +x /app/entrypoint.sh /app/headroom-start.sh
 
 # ---- Workspace + permissions -------------------------------------------------
 RUN mkdir -p /workspace/group /workspace/extra && \
