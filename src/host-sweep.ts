@@ -256,7 +256,7 @@ export function _resetStuckProcessingRowsForTesting(
   session: Session,
   reason: string,
 ): void {
-  resetStuckProcessingRows(inDb, outDb, session, reason);
+  resetStuckProcessingRows(inDb, outDb, session, reason, outDb);
 }
 
 function resetStuckProcessingRows(
@@ -264,6 +264,7 @@ function resetStuckProcessingRows(
   outDb: Database.Database,
   session: Session,
   reason: string,
+  outDbRwOverride: Database.Database | null = null,
 ): void {
   const claims = getProcessingClaims(outDb);
   const now = Date.now();
@@ -305,7 +306,7 @@ function resetStuckProcessingRows(
   // outDb was opened readonly for reads above; reopen with write access for this delete.
   let outDbRw: Database.Database | null = null;
   try {
-    outDbRw = openOutboundDbRw(session.agent_group_id, session.id);
+    outDbRw = outDbRwOverride ?? openOutboundDbRw(session.agent_group_id, session.id);
     const cleared = deleteOrphanProcessingClaims(outDbRw);
     if (cleared > 0) {
       log.info('Cleared orphan processing claims', { sessionId: session.id, cleared, reason });
@@ -313,6 +314,6 @@ function resetStuckProcessingRows(
   } catch (err) {
     log.warn('Failed to clear orphan processing claims', { sessionId: session.id, err });
   } finally {
-    outDbRw?.close();
+    if (!outDbRwOverride) outDbRw?.close();
   }
 }
