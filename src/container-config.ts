@@ -47,6 +47,8 @@ export interface ContainerConfig {
   agentGroupId?: string;
   /** Max messages per prompt. Falls back to code default if unset. */
   maxMessagesPerPrompt?: number;
+  /** Max agentic turns per query. Falls back to code default (20) if unset. */
+  maxTurns?: number;
 }
 
 function emptyConfig(): ContainerConfig {
@@ -87,6 +89,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       assistantName: raw.assistantName,
       agentGroupId: raw.agentGroupId,
       maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
+      maxTurns: raw.maxTurns,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);

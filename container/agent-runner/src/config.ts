@@ -15,10 +15,12 @@ export interface RunnerConfig {
   groupName: string;
   agentGroupId: string;
   maxMessagesPerPrompt: number;
+  maxTurns: number;
   mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }>;
 }
 
 const DEFAULT_MAX_MESSAGES = 10;
+const DEFAULT_MAX_TURNS = 20;
 
 let _config: RunnerConfig | null = null;
 
@@ -42,6 +44,7 @@ export function loadConfig(): RunnerConfig {
     groupName: (raw.groupName as string) || '',
     agentGroupId: (raw.agentGroupId as string) || '',
     maxMessagesPerPrompt: (raw.maxMessagesPerPrompt as number) || DEFAULT_MAX_MESSAGES,
+    maxTurns: (raw.maxTurns as number) || DEFAULT_MAX_TURNS,
     mcpServers: (raw.mcpServers as RunnerConfig['mcpServers']) || {},
   };
 
