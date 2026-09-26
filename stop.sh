@@ -2,8 +2,9 @@
 # Stop nanoclaw: halt the host service and any running agent containers.
 set -euo pipefail
 
-# Stop agent containers (--rm means Docker removes them automatically on stop)
-CONTAINERS=$(docker ps --format '{{.Names}}' | grep '^nanoclaw-' 2>/dev/null || true)
+# Stop agent containers. Since 2.3.0's driver seam, containers are named
+# ncl-… and carry the nanoclaw-session label — filter by label, not name.
+CONTAINERS=$(docker ps --filter label=nanoclaw-session --format '{{.Names}}' 2>/dev/null || true)
 if [ -n "$CONTAINERS" ]; then
   echo "Stopping containers..."
   echo "$CONTAINERS" | xargs docker stop
