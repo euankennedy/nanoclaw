@@ -61,7 +61,7 @@ vi.mock('./modules/index.js', () => ({}));
 vi.mock('./cli/commands/index.js', () => ({}));
 vi.mock('./cli/delivery-action.js', () => ({}));
 vi.mock('./cli/socket-server.js', () => ({ startCliServer: state.ready, stopCliServer: vi.fn() }));
-vi.mock('./log.js', () => ({ log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), fatal: vi.fn() } }));
+vi.mock('./log.js', () => ({ log: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), fatal: vi.fn() } }));
 vi.mock('./channels/channel-registry.js', () => ({
   createChannelDeliveryAdapter: () => ({}),
   teardownChannelAdapters: vi.fn(),
