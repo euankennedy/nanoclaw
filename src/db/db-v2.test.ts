@@ -472,6 +472,7 @@ describe('container configs', () => {
       image_tag: null,
       assistant_name: null,
       max_messages_per_prompt: null,
+      max_turns: null,
       skills: '["all"]',
       mcp_servers: '{}',
       packages_apt: '[]',
