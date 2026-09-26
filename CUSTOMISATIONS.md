@@ -147,3 +147,14 @@ Fork-local deltas that had to move during the merge:
   cancel the old rows.
 - **stop.sh** filters containers by `label=nanoclaw-session` (names are now
   `ncl-…`).
+- **OneCLI gateway upgraded 1.36.0 → 1.41.0** (2026-09-26) by editing the
+  image tag in `~/.onecli/docker-compose.yml` and `docker compose pull && up
+  -d`. Vault data lives in named volumes and survives. ⚠️ Do NOT upgrade past
+  1.41.x — OneCLI 1.43+ removes the agent-grant API this NanoClaw version
+  uses (see `.claude/skills/add-opencode/ONECLI-LEGACY.md`). Rollback:
+  `ONECLI_VERSION`-style edit back to the old tag + `docker compose up -d`.
+- **⚠️ Upgrade tripwire re-stamp:** the 2.4.0 boot tripwire records the exact
+  git commit at update-finish time. Any local commit after that makes the next
+  service start crash-loop with "install not on the sanctioned path". After
+  committing local work, re-stamp before restarting:
+  `pnpm exec tsx scripts/upgrade-state.ts set "" update-nanoclaw`
