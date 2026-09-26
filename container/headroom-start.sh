@@ -6,11 +6,12 @@ set -e
 
 headroom proxy --host 127.0.0.1 --port 8787 &
 
-for i in $(seq 1 20); do
+# 0.39.x initializes its tokenizer/embedding runtime on boot — allow up to 30s.
+for i in $(seq 1 60); do
   sleep 0.5
   curl -sf --noproxy localhost http://localhost:8787/health >/dev/null 2>&1 && break
-  if [ "$i" -eq 20 ]; then
-    echo "[headroom-start] headroom failed to become healthy after 10s" >&2
+  if [ "$i" -eq 60 ]; then
+    echo "[headroom-start] headroom failed to become healthy after 30s" >&2
     exit 1
   fi
 done

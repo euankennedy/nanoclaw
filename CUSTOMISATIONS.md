@@ -34,8 +34,8 @@ No service restart needed — OneCLI injects credentials per-request.
 [Headroom](https://github.com/chopratejas/headroom) runs as a sidecar inside every agent container, compressing LLM context before it reaches the Anthropic API.
 
 **Modified files:**
-- `container/Dockerfile` — adds Python venv, installs `headroom-ai` and dependencies (`HEADROOM_VERSION` ARG)
-- `container/headroom-start.sh` — new startup script: launches headroom, waits for health, sets `ANTHROPIC_BASE_URL=http://localhost:8787`, then execs the agent runner
+- `container/Dockerfile` — adds Python venv, installs `headroom-ai[proxy]` (`HEADROOM_VERSION` ARG, 0.39.0 as of 2026-09-26; the `[proxy]` extra resolves its own deps — don't go back to `--no-deps` + hand-pinned lists)
+- `container/headroom-start.sh` — new startup script: launches headroom, waits for health (up to 30s — 0.39.x initializes its tokenizer/ONNX runtime on boot), sets `ANTHROPIC_BASE_URL=http://localhost:8787`, then execs the agent runner
 - `src/container-runner.ts` — one-line change in the agent `ContainerSpec` (search for `headroom-start.sh`, ~line 1300 in the spec-composition function): `args: ['exec bash /app/headroom-start.sh']` instead of `exec bun run /app/src/index.ts`. Since the 2.3.0 driver seam this lives in the spec, not in the old `buildContainerArgs`.
 - `src/container-runner.test.ts` — the "splits PID 1" assertion expects the headroom entrypoint (fork-local).
 
