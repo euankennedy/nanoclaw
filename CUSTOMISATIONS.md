@@ -62,6 +62,42 @@ Manual restart shortcut:
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw-v2-f4f2273a
 ```
 
+## Startup preflight (Docker + OneCLI readiness)
+
+Before the host starts, a shared preflight ensures **both Docker and the OneCLI
+gateway** are up. Motivation: nanoclaw fetches each agent's secrets from the
+OneCLI gateway *before* it can spawn an agent container. If the gateway is down
+(e.g. a Docker Desktop update leaves its containers stopped), every spawn fails
+with `OneCLIError: fetch failed` and messages queue silently with no Docker
+activity — exactly the symptom that looks like "nanoclaw is broken."
+
+**Files (all ours, not upstream):**
+- `preflight.sh` — single source of truth: `ensure_docker` + `ensure_onecli`
+  (sourced, not executed). `ensure_onecli` brings up
+  `~/.onecli/docker-compose.yml` if the `onecli` container isn't healthy;
+  best-effort (silent skip if no compose file, never blocks host startup).
+- `service-run.sh` — what the launchd plist runs: sources the preflight, runs
+  both checks, then `exec node dist/index.js` (exec so SIGTERM forwards cleanly).
+- `start.sh` — sources the same preflight for visible terminal output, then
+  kickstarts the service.
+
+**Unified pathway:** the plist `ProgramArguments` points at
+`/bin/bash <root>/service-run.sh` instead of `node dist/index.js` directly, so
+the preflight runs on **every** start path — boot/login (`RunAtLoad`), the
+menu-bar widget (`launchctl load`/`kickstart`), and `./start.sh`.
+
+**⚠️ Setup-clobber caveat:** `setup/service.ts` (upstream) unconditionally
+rewrites the plist `ProgramArguments` back to `node dist/index.js` on every
+`/setup` run. After ever re-running setup, re-point the plist:
+```bash
+PLIST=$(ls ~/Library/LaunchAgents/com.nanoclaw-v2*.plist | head -1)
+/usr/libexec/PlistBuddy -c "Delete :ProgramArguments" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :ProgramArguments array" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :ProgramArguments:0 string /bin/bash" "$PLIST"
+/usr/libexec/PlistBuddy -c "Add :ProgramArguments:1 string $(pwd)/service-run.sh" "$PLIST"
+launchctl unload "$PLIST" && launchctl load "$PLIST"   # unload+load; kickstart won't re-read ProgramArguments
+```
+
 ## macOS menu bar status indicator
 
 A native Swift app (`dist/statusbar`) shows a bolt icon in the menu bar with a green/red dot for NanoClaw's running state. Supports Start, Stop, Restart, and View Logs from the menu.
