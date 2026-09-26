@@ -273,7 +273,9 @@ describe('composeSessionSpec', () => {
   it('splits PID 1 so a driver can preserve the image init', () => {
     const agent = compose().containers[0];
     expect(agent.command).toEqual(['bash', '-c']);
-    expect(agent.args).toEqual(['exec bun run /app/src/index.ts']);
+    // Local customization: the fork routes the agent through the Headroom
+    // sidecar; headroom-start.sh execs the same bun entry after health-check.
+    expect(agent.args).toEqual(['exec bash /app/headroom-start.sh']);
   });
 
   it('asks for a shared-private network and the standard posture', () => {
