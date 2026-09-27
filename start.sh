@@ -14,13 +14,18 @@ source "$SCRIPT_DIR/preflight.sh"
 ensure_docker
 ensure_onecli
 
+# Derive the per-install service name the same way upstream tooling does
+# (the old com.nanoclaw*.plist glob could also match the statusbar plist).
+# shellcheck source=setup/lib/install-slug.sh
+source "$SCRIPT_DIR/setup/lib/install-slug.sh"
+
 if [ "$(uname -s)" = "Darwin" ]; then
-  PLIST=$(ls ~/Library/LaunchAgents/com.nanoclaw*.plist 2>/dev/null | head -1 || true)
-  if [ -z "$PLIST" ]; then
-    echo "No nanoclaw launchd service found. Run the setup first." >&2
+  LABEL="$(launchd_label)"
+  PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+  if [ ! -f "$PLIST" ]; then
+    echo "No nanoclaw launchd service found ($PLIST). Run the setup first." >&2
     exit 1
   fi
-  LABEL=$(basename "$PLIST" .plist)
   if launchctl list "$LABEL" >/dev/null 2>&1; then
     launchctl kickstart -k "gui/$(id -u)/$LABEL"
     echo "Service restarted."
@@ -29,6 +34,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
     echo "Service started."
   fi
 else
-  systemctl --user start nanoclaw
+  systemctl --user start "$(systemd_unit)"
   echo "Service started."
 fi
