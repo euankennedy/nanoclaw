@@ -110,21 +110,13 @@ PLIST=$(ls ~/Library/LaunchAgents/com.nanoclaw-v2*.plist | head -1)
 launchctl unload "$PLIST" && launchctl load "$PLIST"   # unload+load; kickstart won't re-read ProgramArguments
 ```
 
-## macOS menu bar status indicator
+## macOS menu bar status indicator — REMOVED
 
-A native Swift app (`dist/statusbar`) shows a bolt icon in the menu bar with a green/red dot for NanoClaw's running state. Supports Start, Stop, Restart, and View Logs from the menu.
-
-**Source:** `.claude/skills/add-macos-statusbar/add/src/statusbar.swift` (modified from the skill default to dynamically detect the slug-versioned plist name)
-
-**Installed as:** `~/Library/LaunchAgents/com.nanoclaw.statusbar.plist`
-
-To rebuild after source changes:
-```bash
-swiftc -O -o dist/statusbar .claude/skills/add-macos-statusbar/add/src/statusbar.swift
-xattr -cr dist/statusbar
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.statusbar.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.statusbar.plist
-```
+Was a native Swift app (`dist/statusbar`, `com.nanoclaw.statusbar.plist`)
+showing NanoClaw's running state in the menu bar. Removed 2026-09-27 per
+`.claude/skills/add-macos-statusbar/REMOVE.md`. The install skill remains in
+`.claude/skills/add-macos-statusbar/` if it's ever wanted again (its custom
+slug-detection tweak is in the skill's `add/src/statusbar.swift`).
 
 ## Channels
 
