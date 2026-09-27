@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../mailbox/sqlite/connection.js';
 import { getPendingMessages, markScriptSkipped } from '../db/messages-in.js';
-import { applyPreTaskScripts, runScript } from './task-script.js';
+import { applyPreTaskScripts, resolveScriptTimeoutMs, runScript } from './task-script.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -113,5 +113,32 @@ describe('a timed-out script is reported as a timeout', () => {
     const joined = lines.join('\n');
     expect(joined).toContain('error: Command failed');
     expect(joined).not.toContain('timed out');
+  });
+});
+
+describe('per-task scriptTimeoutMs override', () => {
+  it('resolves the declared timeout, clamped to [1s, 10min], defaulting to 30s', () => {
+    expect(resolveScriptTimeoutMs({})).toBe(30_000);
+    expect(resolveScriptTimeoutMs({ scriptTimeoutMs: 'fast' })).toBe(30_000);
+    expect(resolveScriptTimeoutMs({ scriptTimeoutMs: Number.NaN })).toBe(30_000);
+    expect(resolveScriptTimeoutMs({ scriptTimeoutMs: 90_000 })).toBe(90_000);
+    expect(resolveScriptTimeoutMs({ scriptTimeoutMs: 10 })).toBe(1_000);
+    expect(resolveScriptTimeoutMs({ scriptTimeoutMs: 10_000_000 })).toBe(600_000);
+  });
+
+  it('a declared timeout reaches execFile: 1s override kills a 3s script that the default would allow', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, trigger, content)
+         VALUES (?, 'task', datetime('now'), 'pending', 1, ?)`,
+      )
+      .run(
+        't-timeout-override',
+        JSON.stringify({ prompt: 'monitor', script: 'sleep 3; echo \'{"wakeAgent": true}\'', scriptTimeoutMs: 1_000 }),
+      );
+
+    const { keep, skipped } = await applyPreTaskScripts(getPendingMessages());
+    expect(keep).toHaveLength(0);
+    expect(skipped).toEqual([{ id: 't-timeout-override', reason: 'error' }]);
   });
 });

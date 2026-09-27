@@ -5,7 +5,24 @@ import type { MessageInRow } from '../db/messages-in.js';
 import { touchHeartbeat } from '../heartbeat.js';
 
 const SCRIPT_TIMEOUT_MS = 30_000;
+// Ceiling for a task-declared scriptTimeoutMs. Must stay well under the host's
+// stale-container ceiling (max(30 min, bash timeout) in reconcile-session.ts):
+// the heartbeat is only touched before and after the script, so a script that
+// outlives that window would get its container reaped mid-run.
+const SCRIPT_TIMEOUT_MAX_MS = 600_000;
 const SCRIPT_MAX_BUFFER = 1024 * 1024;
+
+/**
+ * Per-task override for the script timeout (`scriptTimeoutMs` in the task
+ * content JSON), clamped to [1s, SCRIPT_TIMEOUT_MAX_MS]. Anything non-numeric
+ * falls back to the 30s default. Lets tasks whose scripts do slow local work
+ * (e.g. a cold LLM load on the host) declare the ceiling they actually need.
+ */
+export function resolveScriptTimeoutMs(content: Record<string, unknown>): number {
+  const raw = content.scriptTimeoutMs;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return SCRIPT_TIMEOUT_MS;
+  return Math.min(Math.max(Math.trunc(raw), 1_000), SCRIPT_TIMEOUT_MAX_MS);
+}
 
 export interface ScriptResult {
   wakeAgent: boolean;
@@ -119,7 +136,7 @@ export async function applyPreTaskScripts(messages: MessageInRow[]): Promise<Tas
 
     log(`running script for task ${msg.id}`);
     touchHeartbeat();
-    const result = await runScript(script, msg.id);
+    const result = await runScript(script, msg.id, resolveScriptTimeoutMs(content));
     touchHeartbeat();
 
     if (!result || !result.wakeAgent) {

@@ -189,6 +189,30 @@ describe('updateTask', () => {
     expect(row.process_after).toBe('2999-02-01T00:00:00.000Z');
   });
 
+  it('scriptTimeoutMs merges into content and null removes the override', () => {
+    const db = freshDb();
+    insertTaskRow(db, {
+      id: 'task-1',
+      seriesId: 'task-1',
+      processAfter: '2999-01-01T00:00:00.000Z',
+      recurrence: null,
+      content: JSON.stringify({ prompt: 'p', script: 'echo hi' }),
+    });
+
+    updateTask(db, 'task-1', { scriptTimeoutMs: 120_000 });
+    let parsed = JSON.parse(
+      (db.prepare('SELECT content FROM messages_in WHERE id = ?').get('task-1') as { content: string }).content,
+    );
+    expect(parsed.scriptTimeoutMs).toBe(120_000);
+    expect(parsed.script).toBe('echo hi');
+
+    updateTask(db, 'task-1', { scriptTimeoutMs: null });
+    parsed = JSON.parse(
+      (db.prepare('SELECT content FROM messages_in WHERE id = ?').get('task-1') as { content: string }).content,
+    );
+    expect('scriptTimeoutMs' in parsed).toBe(false);
+  });
+
   it('clears recurrence when null is passed', () => {
     const db = freshDb();
     insertTaskRow(db, {

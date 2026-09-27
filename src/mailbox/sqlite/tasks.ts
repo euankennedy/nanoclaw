@@ -81,6 +81,7 @@ export function deleteTask(db: Database.Database, taskId: string): number {
 export interface TaskUpdate {
   prompt?: string;
   script?: string | null;
+  scriptTimeoutMs?: number | null;
   recurrence?: string | null;
   processAfter?: string;
 }
@@ -105,7 +106,8 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
 
   const setProcessAfter = update.processAfter !== undefined;
   const setRecurrence = update.recurrence !== undefined;
-  const mergeContent = update.prompt !== undefined || update.script !== undefined;
+  const mergeContent =
+    update.prompt !== undefined || update.script !== undefined || update.scriptTimeoutMs !== undefined;
 
   const tx = db.transaction(() => {
     for (const row of rows) {
@@ -114,6 +116,11 @@ export function updateTask(db: Database.Database, taskId: string, update: TaskUp
         const parsed = JSON.parse(row.content) as Record<string, unknown>;
         if (update.prompt !== undefined) parsed.prompt = update.prompt;
         if (update.script !== undefined) parsed.script = update.script;
+        if (update.scriptTimeoutMs !== undefined) {
+          // null clears the override back to the container default
+          if (update.scriptTimeoutMs === null) delete parsed.scriptTimeoutMs;
+          else parsed.scriptTimeoutMs = update.scriptTimeoutMs;
+        }
         content = JSON.stringify(parsed);
       }
 

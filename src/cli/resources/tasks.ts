@@ -23,6 +23,7 @@ import {
   prepareScheduledTask,
   type ScheduledTaskRow,
   validateRecurrence,
+  validateScriptTimeoutMs,
 } from '../../modules/scheduling/create.js';
 import { destroySessionMailbox, sessionDir, withExistingMailboxSession } from '../../session-manager.js';
 import { registerResource } from '../crud.js';
@@ -65,6 +66,18 @@ function statusFilter(args: Record<string, unknown>): TaskStatus | undefined {
     throw new Error('--status must be pending or paused');
   }
   return status;
+}
+
+// Nullable-int arg: undefined = not provided, null = explicit clear
+// ('null'/'none'/''), otherwise must parse as a number (range-checked later
+// by validateScriptTimeoutMs).
+function intOrNull(value: unknown, flag: string): number | null | undefined {
+  if (value === undefined) return undefined;
+  const normalized = normalizeNullableString(value);
+  if (normalized == null) return null;
+  const n = Number(normalized.trim());
+  if (!Number.isFinite(n)) throw new Error(`${flag} must be a number`);
+  return n;
 }
 
 function groupArg(args: Record<string, unknown>, ctx: CallerContext): string | undefined {
@@ -151,6 +164,7 @@ async function createTask(args: Record<string, unknown>, ctx: CallerContext) {
     recurrence,
     processAfter: str(args.process_after),
     script,
+    scriptTimeoutMs: intOrNull(args.script_timeout_ms, '--script-timeout-ms'),
     dangerouslyOverrideRecurrenceLimit: bool(args.dangerously_override_recurrence_limit),
     timezone: await resolveGroupTimezone(group),
   });
@@ -360,6 +374,11 @@ async function updateTaskCommand(args: Record<string, unknown>, ctx: CallerConte
     update.recurrence = recurrence;
   }
   if (script !== undefined) update.script = script;
+  if (args.script_timeout_ms !== undefined) {
+    // Range-check only: the effective script isn't resolved here, and a
+    // timeout on a script-less task is inert (the container ignores it).
+    update.scriptTimeoutMs = validateScriptTimeoutMs(intOrNull(args.script_timeout_ms, '--script-timeout-ms'), true);
+  }
   const fields = Object.keys(update);
   if (fields.length === 0) throw new Error('nothing to update');
 
@@ -440,6 +459,12 @@ registerResource({
     { name: 'recurrence', type: 'string', description: 'Optional cron expression.', updatable: true },
     { name: 'prompt', type: 'string', description: 'Task prompt.', required: true, updatable: true },
     { name: 'script', type: 'string', description: 'Optional pre-task bash script.', updatable: true },
+    {
+      name: 'script_timeout_ms',
+      type: 'number',
+      description: 'Optional script timeout override in ms (default 30000, max 600000). Requires a script.',
+      updatable: true,
+    },
   ],
   operations: {},
   customOperations: {
@@ -486,7 +511,7 @@ registerResource({
         `Create a scheduled task (recurring or one-shot) in the agent group system session.\n\n` +
         `Requires --prompt plus EITHER --recurrence (recurring; first run derived from the cron grid) OR --process-after (one-shot, ISO 8601 or naive local). Always pass --name for a readable id.\n\n` +
         `--script contract (pre-task gate, runs BEFORE the agent wakes):\n` +
-        `  bash, 30s timeout, 1MB output cap. Its LAST stdout line must be JSON:\n` +
+        `  bash, 30s timeout (raise per task with --script-timeout-ms, max 600000), 1MB output cap. Its LAST stdout line must be JSON:\n` +
         `    {"wakeAgent": <bool>, "data": {...}}\n` +
         `  wakeAgent=false marks the run handled without waking the agent (zero tokens);\n` +
         `  wakeAgent=true wakes the agent with data attached to the prompt.\n` +
@@ -528,6 +553,12 @@ registerResource({
           name: 'script',
           type: 'string',
           description: 'Pre-task gate script (bash) — see the --script contract above.',
+        },
+        {
+          name: 'script_timeout_ms',
+          type: 'number',
+          description:
+            'Script timeout override in ms (default 30000, max 600000). For scripts that do slow local work (e.g. cold-loading a local model); requires --script.',
         },
         {
           name: 'group',
@@ -585,6 +616,11 @@ registerResource({
             'Schedule more than 4 fires/day anyway. Only after the user explicitly confirmed they understand the quota/token cost and you agree it is right.',
         },
         { name: 'script', type: 'string', description: 'New pre-task script; "null"/"none" removes it.' },
+        {
+          name: 'script_timeout_ms',
+          type: 'number',
+          description: 'New script timeout in ms (1000–600000); "null"/"none" restores the 30s default.',
+        },
         {
           name: 'group',
           type: 'string',

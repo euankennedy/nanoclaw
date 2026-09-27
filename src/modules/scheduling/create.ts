@@ -27,7 +27,21 @@ export interface PreparedScheduledTask {
   prompt: string;
   recurrence: string | null;
   script: string | null;
+  scriptTimeoutMs: number | null;
   processAfter: string;
+}
+
+// Container-side clamp ceiling (task-script.ts) — reject anything above it at
+// create time instead of silently truncating at run time.
+export const SCRIPT_TIMEOUT_MAX_MS = 600_000;
+
+export function validateScriptTimeoutMs(value: number | null | undefined, hasScript: boolean): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isInteger(value) || value < 1_000 || value > SCRIPT_TIMEOUT_MAX_MS) {
+    throw new Error(`--script-timeout-ms must be an integer between 1000 and ${SCRIPT_TIMEOUT_MAX_MS}`);
+  }
+  if (!hasScript) throw new Error('--script-timeout-ms requires --script');
+  return value;
 }
 
 export type ScheduledTaskRow = TaskRecord;
@@ -106,12 +120,14 @@ export function prepareScheduledTask(input: {
   recurrence?: string | null;
   processAfter?: string;
   script?: string | null;
+  scriptTimeoutMs?: number | null;
   dangerouslyOverrideRecurrenceLimit?: boolean;
   timezone?: string;
 }): PreparedScheduledTask {
   if (!input.prompt) throw new Error('--prompt is required');
   const recurrence = input.recurrence ?? null;
   const script = input.script ?? null;
+  const scriptTimeoutMs = validateScriptTimeoutMs(input.scriptTimeoutMs, script !== null);
   const tz = input.timezone ?? TIMEZONE;
   validateRecurrence(recurrence, tz);
   enforceRecurrenceLimit(recurrence, input.dangerouslyOverrideRecurrenceLimit === true, script !== null, tz);
@@ -125,7 +141,7 @@ export function prepareScheduledTask(input: {
     processAfter = parseProcessAfter(input.processAfter, tz);
   }
 
-  return { name: input.name, prompt: input.prompt, recurrence, script, processAfter };
+  return { name: input.name, prompt: input.prompt, recurrence, script, scriptTimeoutMs, processAfter };
 }
 
 /** Persist a prepared task through NanoClaw's single task/session representation. */
@@ -146,6 +162,7 @@ export async function createScheduledTask(
       content: JSON.stringify({
         prompt: task.prompt,
         script: task.script,
+        ...(task.scriptTimeoutMs != null ? { scriptTimeoutMs: task.scriptTimeoutMs } : {}),
         originSessionId: options?.originSessionId ?? null,
       }),
       status: options?.status ?? 'pending',
