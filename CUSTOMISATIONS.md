@@ -45,6 +45,15 @@ No service restart needed — OneCLI injects credentials per-request.
 
 **Request chain:** `claude-code SDK → headroom (localhost:8787) → HTTPS_PROXY (OneCLI) → api.anthropic.com`
 
+**Expected log noise (0.39+):** headroom's `/health` and `/readyz` endpoints run
+an upstream reachability check — a `HEAD https://api.anthropic.com/` with a 30s
+result cache. The API root has no route, so the probe logs as a **404 in the
+OneCLI request log — that 404 IS the success signal** ("any HTTP response means
+TLS+TCP worked" per headroom source). One shows up at every container boot
+(headroom-start.sh polls `/health`), so hourly task spawns → hourly HEAD 404s.
+Harmless; silence with `HEADROOM_SKIP_UPSTREAM_CHECK=1` in headroom-start.sh if
+ever unwanted.
+
 To verify headroom is receiving traffic (since 2.3.0 containers are named `ncl-…`; filter by label):
 ```bash
 docker exec $(docker ps --filter label=nanoclaw-session --format '{{.Names}}' | head -1) \
