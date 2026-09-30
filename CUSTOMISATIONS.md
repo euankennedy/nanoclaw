@@ -121,6 +121,19 @@ slug-detection tweak is in the skill's `add/src/statusbar.swift`).
 ## Channels
 
 Telegram is set up (adapter files in `src/channels/`).
+
+## Task-session idle ceiling (fork delta, 2026-09-30)
+
+`src/reconcile-session.ts`: task-thread sessions use
+`TASK_ABSOLUTE_CEILING_MS` (5 min) instead of the stock 30-min
+`ABSOLUTE_CEILING_MS`; chat sessions are unchanged. Rationale: the scheduled
+gates (mail-check, fireflies) run hourly, so their containers never survive to
+the next fire anyway — the 30-min idle tail was pure dead time. Declared Bash
+timeouts still stretch the ceiling; idle age counts from the last SDK event, so
+long active wakes are unaffected. `decideStuckAction` gained an optional
+`baseCeilingMs` arg (re-exported via `host-sweep.ts`); tests in
+`src/host-sweep.test.ts` ("task ceiling" cases). Carry this delta through
+future `/update-nanoclaw` merges alongside the `--script-timeout-ms` one.
 ## 2.4.0 update notes (2026-09-26)
 
 Updated from 2.1.19 → 2.4.0 via the upstream transactional `/update-nanoclaw`

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ABSOLUTE_CEILING_MS,
+  TASK_ABSOLUTE_CEILING_MS,
   CLAIM_STUCK_MS,
   _resetStuckProcessingRowsForTesting,
   decideStuckAction,
@@ -49,6 +50,51 @@ describe('decideStuckAction', () => {
       heartbeatAgeMs: JUST_OVER_CEILING_MS,
       ceilingMs: ABSOLUTE_CEILING_MS,
     });
+  });
+
+  // FORK DELTA: task-thread sessions pass the tighter TASK_ABSOLUTE_CEILING_MS
+  // as baseCeilingMs so gate-only containers don't idle for 30 min every hour.
+  it('kills a task-session container over the task ceiling but within the chat ceiling', () => {
+    const idleMs = TASK_ABSOLUTE_CEILING_MS + 1;
+    const res = decideStuckAction({
+      now: BASE,
+      heartbeatMtimeMs: BASE - idleMs,
+      containerState: null,
+      claims: [],
+      baseCeilingMs: TASK_ABSOLUTE_CEILING_MS,
+    });
+    expect(res).toEqual({
+      action: 'kill-ceiling',
+      heartbeatAgeMs: idleMs,
+      ceilingMs: TASK_ABSOLUTE_CEILING_MS,
+    });
+  });
+
+  it('keeps a task-session container within the task ceiling', () => {
+    expect(
+      decideStuckAction({
+        now: BASE,
+        heartbeatMtimeMs: BASE - (TASK_ABSOLUTE_CEILING_MS - 1),
+        containerState: null,
+        claims: [],
+        baseCeilingMs: TASK_ABSOLUTE_CEILING_MS,
+      }),
+    ).toEqual({ action: 'ok' });
+  });
+
+  it('a declared bash timeout still stretches the task ceiling', () => {
+    const declared = TASK_ABSOLUTE_CEILING_MS * 3;
+    const res = decideStuckAction({
+      now: BASE,
+      heartbeatMtimeMs: BASE - (TASK_ABSOLUTE_CEILING_MS + 1),
+      containerState: {
+        currentTool: 'Bash',
+        toolDeclaredTimeoutMs: declared,
+      } as never,
+      claims: [],
+      baseCeilingMs: TASK_ABSOLUTE_CEILING_MS,
+    });
+    expect(res.action).toBe('ok');
   });
 
   it('skips the ceiling check when no heartbeat file exists and no fallback is known', () => {

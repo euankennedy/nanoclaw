@@ -45,6 +45,15 @@ import type { ContainerState, InboundMailbox, OutboundMailbox } from './mailbox/
 // been touched in this long, the container is either stuck or doing genuinely
 // nothing — kill and restart on the next inbound.
 export const ABSOLUTE_CEILING_MS = 30 * 60 * 1000;
+// FORK DELTA: tighter ceiling for task-thread sessions. Scheduled-task
+// containers get no warm-reuse benefit at hourly cadence (the 30-min ceiling
+// reaps them before the next fire anyway), so once their work stops they are
+// pure idle. 5 min keeps them from squatting for half of every hour while
+// staying safely above interactive-tool silent gaps (which task wakes don't
+// use) — chat sessions keep the 30-min ceiling and its ask_user_question /
+// cold-resume margin. Idle age only starts after the last SDK event, so long
+// active wakes are unaffected.
+export const TASK_ABSOLUTE_CEILING_MS = 5 * 60 * 1000;
 // Stuck tolerance window applied per 'processing' claim — "did we see any
 // signs of life since this message was claimed?"
 export const CLAIM_STUCK_MS = 60 * 1000;
@@ -67,8 +76,9 @@ export function decideStuckAction(args: {
   containerStartedAtMs?: number; // fallback when heartbeat file absent
   containerState: ContainerState | null;
   claims: Array<{ messageId: string; statusChanged: string }>;
+  baseCeilingMs?: number; // default ABSOLUTE_CEILING_MS; task sessions pass TASK_ABSOLUTE_CEILING_MS
 }): StuckDecision {
-  const { now, heartbeatMtimeMs, containerStartedAtMs, containerState, claims } = args;
+  const { now, heartbeatMtimeMs, containerStartedAtMs, containerState, claims, baseCeilingMs } = args;
   const declaredBashMs = bashTimeoutMs(containerState);
 
   // Ceiling check prefers the heartbeat file's mtime. A freshly-spawned
@@ -90,7 +100,7 @@ export function decideStuckAction(args: {
   const effectiveHeartbeatMs = heartbeatMtimeMs !== 0 ? heartbeatMtimeMs : (containerStartedAtMs ?? 0);
   if (effectiveHeartbeatMs !== 0) {
     const heartbeatAge = now - effectiveHeartbeatMs;
-    const ceiling = Math.max(ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
+    const ceiling = Math.max(baseCeilingMs ?? ABSOLUTE_CEILING_MS, declaredBashMs ?? 0);
     if (heartbeatAge > ceiling) {
       return { action: 'kill-ceiling', heartbeatAgeMs: heartbeatAge, ceilingMs: ceiling };
     }
@@ -254,6 +264,7 @@ async function enforceRunningContainerSla(
     containerStartedAtMs: getContainerStartedAtMs(session.id),
     containerState: outDb.getContainerState(),
     claims: gatedClaims,
+    baseCeilingMs: isTaskThread(session.thread_id) ? TASK_ABSOLUTE_CEILING_MS : ABSOLUTE_CEILING_MS,
   });
 
   if (decision.action === 'ok') return;
