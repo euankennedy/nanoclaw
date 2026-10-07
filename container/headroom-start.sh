@@ -4,7 +4,11 @@
 # injection still flows: SDK → headroom → OneCLI → api.anthropic.com.
 set -e
 
-headroom proxy --host 127.0.0.1 --port 8787 &
+# --disable-kompress: Kompress (the ML compressor) downloads its HF model
+# (chopratejas/kompress-v2-base + ModernBERT) on every container boot — ~50
+# CDN fetches per spawn, uncached because containers are --rm. Rule-based and
+# cache-mode compression still run without it.
+headroom proxy --host 127.0.0.1 --port 8787 --disable-kompress &
 
 # 0.39.x initializes its tokenizer/embedding runtime on boot — allow up to 30s.
 for i in $(seq 1 60); do
