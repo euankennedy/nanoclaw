@@ -34,14 +34,24 @@ No service restart needed — OneCLI injects credentials per-request.
 [Headroom](https://github.com/chopratejas/headroom) runs as a sidecar inside every agent container, compressing LLM context before it reaches the Anthropic API.
 
 **Modified files:**
-- `container/Dockerfile` — adds Python venv, installs `headroom-ai[proxy]` (`HEADROOM_VERSION` ARG, 0.39.0 as of 2026-09-26; the `[proxy]` extra resolves its own deps — don't go back to `--no-deps` + hand-pinned lists)
-- `container/headroom-start.sh` — new startup script: launches headroom, waits for health (up to 30s — 0.39.x initializes its tokenizer/ONNX runtime on boot), sets `ANTHROPIC_BASE_URL=http://localhost:8787`, then execs the agent runner
+- `container/Dockerfile` — adds Python venv, installs `headroom-ai[proxy]` (`HEADROOM_VERSION` ARG, 0.40.0 as of 2026-10-08; the `[proxy]` extra resolves its own deps — don't go back to `--no-deps` + hand-pinned lists)
+- `container/headroom-start.sh` — new startup script: launches headroom with `--disable-kompress` (see below), waits for health (up to 30s; 0.40.0 is healthy in ~2s), sets `ANTHROPIC_BASE_URL=http://localhost:8787`, then execs the agent runner
 - `src/container-runner.ts` — one-line change in the agent `ContainerSpec` (search for `headroom-start.sh`, ~line 1300 in the spec-composition function): `args: ['exec bash /app/headroom-start.sh']` instead of `exec bun run /app/src/index.ts`. Since the 2.3.0 driver seam this lives in the spec, not in the old `buildContainerArgs`.
 - `src/container-runner.test.ts` — the "splits PID 1" assertion expects the headroom entrypoint (fork-local).
 
 **Key lesson:** Do NOT set `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` in `headroom-start.sh`. The claude-code binary reads its credentials from `/home/node/.claude` (mounted from `data/v2-sessions/<group>/.claude-shared`). Overriding with a placeholder breaks auth.
 
 **Key lesson 2 (2.4.0 update):** a host shell with `ANTHROPIC_BASE_URL` exported (e.g. from a profile that sets it for headroom testing) breaks the upstream OneCLI gateway tests — run `pnpm test` with `ANTHROPIC_BASE_URL=""` if it's set in your shell.
+
+**Kompress disabled (2026-10-08):** on 0.39.0 the Kompress ML compressor
+pulled its HF model (`chopratejas/kompress-v2-base` + ModernBERT) on every
+container boot — ~50 requests to `us.aws.cdn.hf.co` / `huggingface.co` /
+`cas-server.xethub.hf.co` per spawn, uncached because containers are `--rm`.
+With hourly task wakes that was constant background traffic, and it peaked
+alongside a stalled mail-check token request on 8 Oct. 0.40.0's `[proxy]` extra
+no longer installs Kompress at all (`[ml]` does); the flag guards against it
+returning. To bring ML compression back properly: install `[ml]`, bake the
+model into the image at build time, and set `HF_HUB_OFFLINE=1`.
 
 **Request chain:** `claude-code SDK → headroom (localhost:8787) → HTTPS_PROXY (OneCLI) → api.anthropic.com`
 
@@ -122,6 +132,85 @@ slug-detection tweak is in the skill's `add/src/statusbar.swift`).
 
 Telegram is set up (adapter files in `src/channels/`).
 
+## LM Studio server LaunchAgent (2026-10-01)
+
+`~/Library/LaunchAgents/com.euankennedy.lms-server.plist` runs
+`~/.lmstudio/bin/lms server start` at login (RunAtLoad, logs to
+`/tmp/lms-server-start.log`). Added after an overnight reboot left the LM
+Studio headless server down and the local-LLM email/URL lanes silently closed
+(everything escalated to Claude for a morning). The macOS "background items"
+alert attributes this agent to **Element Labs Inc.** — that's the code
+signature on the `lms` binary, i.e. LM Studio's developer; it IS this agent.
+
+Pause/resume: System Settings → Login Items & Extensions → "Allow in the
+Background" (Element Labs Inc. item), or
+`launchctl disable|enable gui/$UID/com.euankennedy.lms-server`. The agent only
+starts the server at login; a running server is stopped with `lms server stop`.
+If paused, the lanes degrade gracefully — health check fails and all work
+routes to Claude.
+
+## Sleep-prevention LaunchAgent — 06:00-18:00 work window (2026-10-05)
+
+`~/Library/LaunchAgents/com.euankennedy.nanoclaw-awake.plist` holds a
+`caffeinate -s` assertion (prevent system sleep, **AC only**) during the
+06:00-18:00 window so macOS 27 maintenance sleep doesn't freeze the host
+process + task containers mid-run.
+
+**Why:** diagnosed 5 Oct — on macOS 27.0.1 (Golden Gate, build 26A434) the
+`node` host is suspended for the entire duration of each "Maintenance Sleep"
+window (proven: multi-hour gaps in the 1s delivery-poll log, resume timestamps
+matching `pmset` DarkWake events to the second). Hourly runs then only execute
+in brief wake windows; long local-lane inference (40-100s) overruns them and
+the container is ceiling-killed mid-script. Not a bug — standard macOS sleep;
+our own move to hourly + weekend + heavier local lanes made it visible. The
+`dasd` Golden Gate leak was checked and ruled out on this machine.
+
+**Mechanism:** fires at 06:00 (`StartCalendarInterval`; launchd runs it on the
+next wake if asleep at 06:00) and at load (`RunAtLoad`). Computes seconds until
+18:00 and `exec caffeinate -s -t <that>`, so the assertion auto-drops at 18:00.
+Off AC it is a harmless no-op; outside the window it exits immediately. Verify:
+`pmset -g assertions | grep PreventSystemSleep` (1 = held), log `/tmp/nanoclaw-awake.log`.
+
+**Scope + residual gap:** covers the cases that matter (plugged in, lid open —
+desk at work/home). Does NOT cover lid-closed-in-bag-on-battery (clamshell
+forces sleep; `-s` is void off AC) — those runs freeze until the next
+wake/plug-in, where the mail-check **orphan guard** (`mail-pending.json`)
+replays them. Independent of the nanoclaw service (doesn't wrap
+`service-run.sh`), so no SIGTERM-forwarding concern.
+
+**Pause/remove:** `launchctl bootout gui/$UID ~/Library/LaunchAgents/com.euankennedy.nanoclaw-awake.plist`.
+Deferred alternative for a hard 06:00 guarantee from deep sleep: add a
+`sudo pmset repeat wakeorpoweron ... 05:58:00` scheduled wake (needs sudo).
+
+## Apple FM `fm serve` LaunchAgent (2026-10-03)
+
+`~/Library/LaunchAgents/com.euankennedy.fm-serve.plist` runs
+`/usr/bin/fm serve --port 11435` (macOS 27 Apple Foundation Models,
+on-device) at login with KeepAlive (logs to `/tmp/fm-serve.log`). Second
+tier for the mail-check URL lane: `summariseUrl` in
+`groups/dm-with-euan/lib/local-llm.mjs` tries LM Studio first, falls back
+to Apple FM via this endpoint, and Claude remains the final fallback via
+the normal escalation path. `summariseAttachment` gets the same fm rescue
+mid-lane (gpt-oss primary; A/B in `NANOCLAW_FM_ATTACHMENT_REPLAY.md`).
+Containers reach it at
+`host.docker.internal:11435` (verified from the agent image). The lane
+gate in `mail-check.mjs` stays open if either engine is healthy; the
+email extract/draft lane remains LM-Studio-only (Apple FM failed the
+extraction fixtures — 4/6 best vs gpt-oss-20b's 6/6, 3 Oct).
+
+Gotchas: `fm serve` defaults to SSE streaming (`stream:false` is
+load-bearing in `fmComplete`); no guardrails flag on serve (CLI-only),
+and default guardrails can false-positive refuse — rate watchable via
+`model:"apple-fm-system"` entries in `local-llm-log.jsonl`. ~8k-token
+context ceiling, no cold load. Pause/resume:
+`launchctl unload|load ~/Library/LaunchAgents/com.euankennedy.fm-serve.plist`.
+
+Related (outside this repo): `~/Automation/screenshot-namer/` switched to
+Apple FM via `LOCAL_MODEL_STRATEGY = "fm"` in `screenshot-namer.py`
+(`"lms"` switches back to the intact LM Studio path; A/B page at
+`~/Automation/screenshot-namer/fm-comparison.html`, Euan scored fm 9 /
+qwen 7 / tie 4 on 3 Oct).
+
 ## Task-session idle ceiling (fork delta, 2026-09-30)
 
 `src/reconcile-session.ts`: task-thread sessions use
@@ -134,6 +223,19 @@ long active wakes are unaffected. `decideStuckAction` gained an optional
 `baseCeilingMs` arg (re-exported via `host-sweep.ts`); tests in
 `src/host-sweep.test.ts` ("task ceiling" cases). Carry this delta through
 future `/update-nanoclaw` merges alongside the `--script-timeout-ms` one.
+
+## Persistent task-script log (fork delta, 2026-10-08)
+
+`container/agent-runner/src/scheduling/task-script.ts`: every `[task-script]`
+line (run, skip, error, timeout) plus the **tail** (last 4000 chars) of each
+pre-task script's stderr is appended to `/workspace/agent/logs/task-scripts.log`
+→ on the host at `groups/<folder>/logs/task-scripts.log` (rotates to `.1` at
+1 MB). Why: containers are `--rm` and session-mode exits don't surface a
+stderr tail, so on 8 Oct a mail-check run that died on a stalled Graph token
+request left no trace — it had to be reconstructed from OneCLI's gateway log.
+The console copy still goes to stderr (first 500 chars, as upstream). Loaded
+from the mounted source, so no image rebuild is needed for changes here.
+
 ## 2.4.0 update notes (2026-09-26)
 
 Updated from 2.1.19 → 2.4.0 via the upstream transactional `/update-nanoclaw`
