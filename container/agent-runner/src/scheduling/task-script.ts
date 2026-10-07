@@ -29,8 +29,32 @@ export interface ScriptResult {
   data?: unknown;
 }
 
+// Local customization: console output dies with the container (`--rm`, and
+// session-mode exits don't surface a stderr tail), so script failures were
+// invisible after the fact. Mirror every task-script line into the group
+// workspace, which persists on the host at groups/<folder>/logs/.
+const PERSIST_LOG_PATH = '/workspace/agent/logs/task-scripts.log';
+const PERSIST_LOG_MAX_BYTES = 1024 * 1024;
+
+function persist(msg: string): void {
+  try {
+    fs.mkdirSync(path.dirname(PERSIST_LOG_PATH), { recursive: true });
+    try {
+      if (fs.statSync(PERSIST_LOG_PATH).size > PERSIST_LOG_MAX_BYTES) {
+        fs.renameSync(PERSIST_LOG_PATH, `${PERSIST_LOG_PATH}.1`);
+      }
+    } catch {
+      /* no log yet */
+    }
+    fs.appendFileSync(PERSIST_LOG_PATH, `${new Date().toISOString()} ${msg}\n`);
+  } catch {
+    /* best-effort: never let logging break a task */
+  }
+}
+
 function log(msg: string): void {
   console.error(`[task-script] ${msg}`);
+  persist(msg);
 }
 
 export async function runScript(
@@ -54,7 +78,10 @@ export async function runScript(
         }
 
         if (stderr) {
-          log(`[${taskId}] stderr: ${stderr.slice(0, 500)}`);
+          console.error(`[task-script] [${taskId}] stderr: ${stderr.slice(0, 500)}`);
+          // Keep the tail, not the head: node's experimental-feature warnings
+          // lead stderr and would crowd out the script's own error line.
+          persist(`[${taskId}] stderr: ${stderr.slice(-4000).trimEnd()}`);
         }
 
         if (error) {
