@@ -12,7 +12,9 @@ destination. It can also be run on demand.
 ## Hard rules
 
 - **Vault access is ONLY via the Obsidian MCP tools (`mcp__obsidian__*`).** Never read or write
-  the vault through the filesystem, even though the folder is mounted.
+  the vault through the filesystem, even though the folder is mounted. The one exception is the
+  transcript file in step 3b, written by the deterministic `save-transcript.mjs` helper (you
+  never write or edit it yourself).
 - **Never overwrite `_active-context.md`, `_inbox.md`, or `_memory.md` wholesale.** Use
   `patch_note` (append) only.
 - **Creating a new note is only allowed when the caller has explicitly confirmed a new
@@ -67,6 +69,19 @@ project's `comms-log.md`, never in `index.md`. See `projects/README.md` for the 
 - If it is missing and `createIfMissing` is false → stop and report that the note does not exist
   (the caller must confirm a new note first).
 
+### 3b. Save the full transcript
+Once the write target is settled (and exists, or you have just created it), save the transcript
+beside it:
+```
+node /workspace/agent/save-transcript.mjs <transcriptId> <write target>
+```
+e.g. `node /workspace/agent/save-transcript.mjs 01M4… projects/tmr/01246/comms-log.md` writes
+`projects/tmr/01246/meetings/<YYYYMMDD-HHmm>-<slug>.md` (Brisbane time). It prints
+`{ transcriptPath, written, linkLine }`; keep `linkLine` for step 4. It never overwrites an
+existing transcript, so re-running on a corrected route is safe.
+- Exit code 2 means no transcript yet: stop and report "not ready", as in step 1.
+- Any other failure: carry on without the transcript line and say so in the report.
+
 ### 4. Write the dated section
 `patch_note` on the **write target** from step 3 to append (do not replace existing content):
 ```markdown
@@ -76,6 +91,8 @@ project's `comms-log.md`, never in `index.md`. See `projects/README.md` for the 
 ## <Meeting Title> — <DD Mon YYYY>
 
 **Attendees:** <names>
+
+<linkLine from step 3b, e.g. **Transcript:** [[projects/tmr/01246/meetings/20261013-1415-tmr-weekly-status|Full transcript]]>
 
 **Key updates:**
 - <bullet>
@@ -109,6 +126,6 @@ Anything significant that does not belong in the write target or `_active-contex
 short dated line to `_inbox.md` (patch, never wholesale) for later triage.
 
 ### 7. Report back
-One line: what was written where, how many actions captured, whether `_active-context.md` was
+One line: what was written where, the transcript path, how many actions captured, whether `_active-context.md` was
 updated, and whether anything went to `_inbox.md`. The scheduled task uses this for its Telegram
 confirmation, so Euan can review any active-context change.
