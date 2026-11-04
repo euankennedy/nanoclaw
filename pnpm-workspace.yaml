@@ -1,7 +1,11 @@
-onlyBuiltDependencies:
-  - esbuild
-  - protobufjs
-  - sharp
+# Which dependencies may run install scripts (pnpm 11+ replaced onlyBuiltDependencies with this map;
+# strictDepBuilds then fails the install on any build not listed). better-sqlite3 is denied, as it
+# was implicitly under pnpm 10: its prebuilt binary is used.
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  sharp: true
+  better-sqlite3: false
 
 # Top-level, NOT nested under a `pnpm:` key: pnpm reads a `pnpm:` config block
 # only from package.json. Nested here in pnpm-workspace.yaml the setting is
