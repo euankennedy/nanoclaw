@@ -236,6 +236,51 @@ request left no trace — it had to be reconstructed from OneCLI's gateway log.
 The console copy still goes to stderr (first 500 chars, as upstream). Loaded
 from the mounted source, so no image rebuild is needed for changes here.
 
+## Pomni's Telegram topics (2026-10-31, Still QL.2)
+
+Pomni's scheduled reports post to topics in a "Pomni" Telegram supergroup
+(`telegram:-1004369284676`, Topics on) instead of Euan's DM. No core change:
+`src/delivery.ts` passes `thread_id` to the adapter as-is, and
+`@chat-adapter/telegram` turns `telegram:<chat>:<topicId>` into
+`message_thread_id` for text and documents.
+
+**Operator setup (central DB, lost on a fresh install):**
+- Messaging group `mg-1793436816845-piptqx`, registered by posting
+  `/start@nanoclaw_euan_bot connect` in the group and **rejecting** the approval
+  card. `denied_at` is set on purpose: @mentions there are dropped, and Pomni has
+  no wiring to it. Delivery checks only `detached_at` and the destination row.
+- Destination `pomni-topics` (Pomni → that group):
+  `ncl destinations add --agent-group-id ag-1777515526404-pd3bg6 --local-name pomni-topics --target-type channel --target-id mg-1793436816845-piptqx`.
+- The bot is a group admin with only "Manage topics". Topics were created with the raw
+  Bot API `createForumTopic` (the adapter has no call for it); ids in
+  `groups/dm-with-euan/telegram-topics.json`.
+
+**Group folder (untracked):** `lib/telegram.mjs` is the one send path. Every
+script uses it, it falls back to the DM when a stream has no topic, and it has a CLI
+for the agent, because `send_message` can't target a topic: it would land in
+General, since Telegram's inbound threads are nulled. Tests:
+`tests/telegram.test.mjs`. Backup before the change:
+`OneDrive-MojoSoup/nanoclaw-backups/2026-10-31-still-ql2/`, which also holds the
+mail-check and fireflies task prompts as they were. To roll back, delete
+`telegram-topics.json`: every stream then goes to the DM.
+
+## Toolchain: pnpm 12, Node 24, test temp dirs (2026-11-04, from Still)
+
+- **pnpm 12.17.0** via corepack (`packageManager`). pnpm 11 removed
+  `onlyBuiltDependencies`, and pnpm 12 errors on it, so `pnpm-workspace.yaml` has an
+  `allowBuilds` map: esbuild, protobufjs, sharp allowed as before, and
+  `better-sqlite3: false`, which pnpm 10 skipped silently. Its prebuilt binary is
+  used; without the entry `strictDepBuilds` fails the install. pnpm 11+ reads `.npmrc`
+  for auth and registry only.
+- **`.nvmrc` 24** (upstream: 22). `service-run.sh` runs nvm's default node, which is 24
+  on this Mac since 4 Nov; the file now says so. `engines` still `>=22`.
+- **`scripts/vitest-tmpdir.ts`** (globalSetup in `vitest.config.ts`): each test run
+  gets `/tmp/nc-run-XXXXXX` as TMPDIR and removes it afterwards. A full run used to
+  leave ~750 dirs in the macOS `$TMPDIR`. `/tmp`, not `$TMPDIR`: one more level under
+  `/var/folders/...` pushes test sockets past the 104-byte Unix socket limit.
+- Each local commit trips the upgrade tripwire on the next start: validate, then
+  `pnpm exec tsx scripts/upgrade-state.ts set`, then restart (`docs/upgrade-recovery.md`).
+
 ## 2.4.0 update notes (2026-09-26)
 
 Updated from 2.1.19 → 2.4.0 via the upstream transactional `/update-nanoclaw`
